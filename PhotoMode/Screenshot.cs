@@ -2,6 +2,7 @@
 using System.IO;
 using Rewired;
 using MelonLoader;
+using System.Collections.Generic;
 
 namespace Photos_Plus
 {
@@ -58,7 +59,10 @@ namespace Photos_Plus
             "\n" +
             "D-Pad Left: Toggle Character Isolation\n" +
             "Y: Teleport Character\n" +
-            "X: Take Screenshot");
+            "X: Take Screenshot\n" +
+            "\n" +
+            "D-Pad Right: Toggle Object/Camera Movement\n" +
+            "RB/LB: Cycle Between Objects");
 
         // Displays Render Resolution On Screen
         private GUIContent resGui = new GUIContent(
@@ -71,17 +75,24 @@ namespace Photos_Plus
         private bool dpadUp;
         private bool dpadDown;
 
+        // Character Data
+        private PlayerBase playerChar;
+        private List<PlayerBase> spawnedChars = new List<PlayerBase>();
+
+        // Objects
+        private List<Transform> myTransforms = new List<Transform>();
+        private int selectedObject;
+        private bool manipulateObject;
+
+        private List<bool> characterEffects = new List<bool>();
+        private List<bool> superEffects = new List<bool>();
+        private List<bool> terrainEffects = new List<bool>();
+
         private void Start()
         {
             // Get The Input Controller
 
             p = ReInput.players.GetPlayer(0);
-
-            //Type t = typeof(RInput);
-            //RInput rin = Singleton<RInput>.Instance;
-
-            //FieldInfo field = t.GetField("P", BindingFlags.Instance | BindingFlags.NonPublic);
-            //p = (Player)field.GetValue(rin);
         }
 
         // Get New Filename
@@ -123,6 +134,21 @@ namespace Photos_Plus
                 cRot.x = transform.rotation.eulerAngles.x;
                 cRot.y = transform.rotation.eulerAngles.y;
 
+                // Get The Current Player Character
+                playerChar = GameObject.FindObjectOfType<PlayerBase>();
+                myTransforms.Clear();
+                myTransforms.Add(playerChar.transform);
+                selectedObject = 0;
+                manipulateObject = false;
+
+                characterEffects.Clear();
+                superEffects.Clear();
+                terrainEffects.Clear();
+
+                characterEffects.Add(false);
+                superEffects.Add(false);
+                terrainEffects.Add(false);
+
                 // Always Start Rendering Entire Scene When First Activated
                 renderIsolated = 0;
 
@@ -154,6 +180,8 @@ namespace Photos_Plus
                 // Hide The Game's UI
                 GameObject.FindObjectOfType<UI>().GetComponent<Canvas>().enabled = false;
 
+                Cursor.visible = true;
+
                 // Freeze The Game
                 Time.timeScale = 0;
             } 
@@ -177,6 +205,18 @@ namespace Photos_Plus
 
                 // Enable The Game's UI
                 GameObject.FindObjectOfType<UI>().GetComponent<Canvas>().enabled = true;
+
+                // Destroy All Spawned Characters
+                foreach (PlayerBase character in spawnedChars)
+                {
+                    Destroy(character.gameObject);
+                }
+
+                Cursor.visible = false;
+
+                spawnedChars.Clear();
+
+                ReSetCharacter();
             }
 
             // Use Freecam Controls When Freecam Is Activated
@@ -219,10 +259,16 @@ namespace Photos_Plus
             }
 
             // Move The Camera
-            transform.position += moveVector;
+            if (manipulateObject)
+                myTransforms[selectedObject].position += moveVector;
+            else
+                transform.position += moveVector;
 
             // Change moveVector To The Camera's Rotation
-            moveVector = transform.localEulerAngles;
+            if (manipulateObject)
+                moveVector = myTransforms[selectedObject].localEulerAngles;
+            else
+                moveVector = transform.localEulerAngles;
 
             // Use Right Stick Analogue Y Axis To Set The Vertical Rotation Of The Camera
             if (p.GetAxis("Right Stick Y") != 0)
@@ -251,7 +297,10 @@ namespace Photos_Plus
             }
 
             // Rotate The Camera
-            transform.localEulerAngles = moveVector;
+            if (manipulateObject)
+                myTransforms[selectedObject].localEulerAngles = moveVector;
+            else
+                transform.localEulerAngles = moveVector;
 
             // Position 2 Units In Front Of The Current View For Objects To Teleport To
             Vector3 tpPos = transform.position + (transform.forward * 2);
@@ -259,7 +308,7 @@ namespace Photos_Plus
             // Teleport The Player Character To tpPos When The Player Presses "Y"
             if (p.GetButtonDown("Button Y"))
             {
-                GameObject.FindObjectOfType<PlayerBase>().transform.position = tpPos;
+                myTransforms[selectedObject].position = tpPos;
             }
 
             // Take A Screenshot When The Player Presses "X"
@@ -295,12 +344,15 @@ namespace Photos_Plus
             else if (dpadLeft)
                 dpadLeft = false;
 
-            // D-Pad Right - Unused
+            // Toggle Between Moving The Camera And The Currently Selected Object When The Player
+            // Presses Right On The D-Pad
             if (p.GetAxis("D-Pad X") > 0)
             {
                 if (!dpadRight)
                 {
                     dpadRight = true;
+
+                    manipulateObject = !manipulateObject;
                 }
             } else if (dpadRight) dpadRight = false;
 
@@ -335,6 +387,20 @@ namespace Photos_Plus
                 }
             }
             else if (dpadDown) dpadDown = false;
+
+            if (p.GetButtonDown("Right Bumper"))
+            {
+                selectedObject++;
+                if (selectedObject >= myTransforms.Count)
+                    selectedObject = 0;
+            }
+
+            if (p.GetButtonDown("Left Bumper"))
+            {
+                selectedObject--;
+                if (selectedObject < 0)
+                    selectedObject = myTransforms.Count - 1;
+            }
 
             // Update lastFrameTime
             lastFrameTime = Time.realtimeSinceStartup;
@@ -419,6 +485,10 @@ namespace Photos_Plus
         // Renders Only The Player Layer
         private Texture2D RenderPlayerOnly()
         {
+            ToggleCharacterEffects();
+            ToggleCharacterSuperEffects();
+            ToggleCharacterTerrainEffects();
+
             // Create A Texture2D To Apply The Render To
             Texture2D mainShot = new Texture2D(Mathf.RoundToInt(float.Parse(resWidth.ToString()) * multiplier), Mathf.RoundToInt(float.Parse(resHeight.ToString()) * multiplier), TextureFormat.RGBA32, false);
 
@@ -462,6 +532,8 @@ namespace Photos_Plus
             camera.farClipPlane = 4500f;
             camera.cullingMask = mask;
 
+            ResetAllPlayerLayers();
+
             // Return The Render
             return mainShot;
         }
@@ -493,7 +565,196 @@ namespace Photos_Plus
             {
                 GUILayout.Box(gui);
                 GUILayout.Box(resGui);
+
+                GUILayout.BeginVertical("box");
+
+                GUILayout.Label("Spawn Characters");
+
+                PlayerBase pbase;
+
+                if (GUILayout.Button("Sonic"))
+                {
+                    pbase = CreateCharacter("Sonic_New");
+                    spawnedChars.Add(pbase);
+                    myTransforms.Add(pbase.transform);
+
+                    characterEffects.Add(false);
+                    superEffects.Add(false);
+                    terrainEffects.Add(false);
+                }
+                if (GUILayout.Button("Tails"))
+                {
+                    pbase = CreateCharacter("Tails");
+                    spawnedChars.Add(pbase);
+                    myTransforms.Add(pbase.transform);
+
+                    characterEffects.Add(false);
+                    superEffects.Add(false);
+                    terrainEffects.Add(false);
+                }
+                if (GUILayout.Button("Knuckles"))
+                {
+                    pbase = CreateCharacter("Knuckles");
+                    spawnedChars.Add(pbase);
+                    myTransforms.Add(pbase.transform);
+
+                    characterEffects.Add(false);
+                    superEffects.Add(false);
+                    terrainEffects.Add(false);
+                }
+                if (GUILayout.Button("Shadow"))
+                {
+                    pbase = CreateCharacter("Shadow");
+                    spawnedChars.Add(pbase);
+                    myTransforms.Add(pbase.transform);
+
+                    characterEffects.Add(false);
+                    superEffects.Add(false);
+                    terrainEffects.Add(false);
+                }
+                if (GUILayout.Button("Rouge"))
+                {
+                    pbase = CreateCharacter("Rouge");
+                    spawnedChars.Add(pbase);
+                    myTransforms.Add(pbase.transform);
+
+                    characterEffects.Add(false);
+                    superEffects.Add(false);
+                    terrainEffects.Add(false);
+                }
+                if (GUILayout.Button("Omega"))
+                {
+                    pbase = CreateCharacter("Omega");
+                    spawnedChars.Add(pbase);
+                    myTransforms.Add(pbase.transform);
+
+                    characterEffects.Add(false);
+                    superEffects.Add(false);
+                    terrainEffects.Add(false);
+                }
+                if (GUILayout.Button("Silver"))
+                {
+                    pbase = CreateCharacter("Silver");
+                    spawnedChars.Add(pbase);
+                    myTransforms.Add(pbase.transform);
+
+                    characterEffects.Add(false);
+                    superEffects.Add(false);
+                    terrainEffects.Add(false);
+                }
+                if (GUILayout.Button("Blaze"))
+                {
+                    pbase = CreateCharacter("Blaze");
+                    spawnedChars.Add(pbase);
+                    myTransforms.Add(pbase.transform);
+
+                    characterEffects.Add(false);
+                    superEffects.Add(false);
+                    terrainEffects.Add(false);
+                }
+                if (GUILayout.Button("Amy"))
+                {
+                    pbase = CreateCharacter("Amy");
+                    spawnedChars.Add(pbase);
+                    myTransforms.Add(pbase.transform);
+
+                    characterEffects.Add(false);
+                    superEffects.Add(false);
+                    terrainEffects.Add(false);
+                }
+                if (GUILayout.Button("Sonic And Elise"))
+                {
+                    pbase = CreateCharacter("Princess");
+                    spawnedChars.Add(pbase);
+                    myTransforms.Add(pbase.transform);
+
+                    characterEffects.Add(false);
+                    superEffects.Add(false);
+                    terrainEffects.Add(false);
+                }
+
+                GUILayout.EndVertical();
+
+                GUILayout.BeginVertical("box");
+
+                GUILayout.Label("Selected Object: " + myTransforms[selectedObject].name);
+
+                GUILayout.Label("\n-Following Toggles Only For Character Only Renders-");
+
+                characterEffects[selectedObject] = GUILayout.Toggle(characterEffects[selectedObject], "Display Character Effects");
+                superEffects[selectedObject] = GUILayout.Toggle(superEffects[selectedObject], "Display Character Super Effects");
+                terrainEffects[selectedObject] = GUILayout.Toggle(terrainEffects[selectedObject], "Display Character Terrain Effects");
+
+                if (manipulateObject)
+                    GUILayout.Label("Moving Object");
+                else
+                    GUILayout.Label("Moving Camera");
+                GUILayout.EndVertical();
             }
+        }
+
+        private PlayerBase CreateCharacter(string character)
+        {
+            return (Instantiate(Resources.Load("DefaultPrefabs/Player/" + character), transform.position + (transform.forward * 2), Quaternion.identity) as GameObject).GetComponent<PlayerBase>();
+        }
+
+        private void ReSetCharacter()
+        {
+            playerChar.enabled = true;
+        }
+
+        private void ToggleCharacterEffects()
+        {
+            for (int i = 0; i < myTransforms.Count; i++)
+            {
+                if (characterEffects[i])
+                {
+                    ChangeLayersRecursively(myTransforms[i].Find("PlayerEffects"), 0);
+
+                    if (myTransforms[i].Find("PlayerEffects/SuperFX"))
+                    {
+                        ChangeLayersRecursively(myTransforms[i].Find("PlayerEffects/SuperFX"), 8);
+                    }
+                }
+            }
+        }
+
+        private void ToggleCharacterTerrainEffects()
+        {
+            for (int i = 0; i < myTransforms.Count; i++)
+            {
+                if (terrainEffects[i])
+                {
+                    ChangeLayersRecursively(myTransforms[i].Find("CharacterTerrain(Clone)"), 0);
+                }
+            }
+        }
+
+        private void ToggleCharacterSuperEffects()
+        {
+            for (int i = 0; i < myTransforms.Count; i++)
+            {
+                if (myTransforms[i].Find("PlayerEffects/SuperFX"))
+                {
+                    ChangeLayersRecursively(myTransforms[i].Find("PlayerEffects/SuperFX"), 0);
+                }
+            }
+        }
+
+        private void ResetAllPlayerLayers()
+        {
+            for (int i = 0; i < myTransforms.Count; i++)
+            {
+                ChangeLayersRecursively(myTransforms[i], 8);
+            }
+        }
+
+        private void ChangeLayersRecursively(Transform trans, int layer)
+        {
+            trans.gameObject.layer = layer;
+
+            foreach (Transform child in trans)
+                ChangeLayersRecursively(child, layer);
         }
     }
 }
