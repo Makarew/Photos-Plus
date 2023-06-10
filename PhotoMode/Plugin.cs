@@ -13,7 +13,11 @@ namespace Photos_Plus
         public override void OnSceneWasLoaded(int buildIndex, string sceneName)
         {
             base.OnSceneWasLoaded(buildIndex, sceneName);
-            if (sceneName.EndsWith("_sn") || sceneName.EndsWith("_tl") || sceneName.EndsWith("_sd") || sceneName.EndsWith("_rg"))
+
+            if (GameObject.FindObjectOfType<Screenshot>())
+                return;
+
+            if (GameObject.FindObjectOfType<PlayerCamera>())
             {
                 sc = GameObject.FindObjectOfType<PlayerCamera>().gameObject.AddComponent<Screenshot>();
             } else

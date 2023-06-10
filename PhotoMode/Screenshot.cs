@@ -3,6 +3,7 @@ using System.IO;
 using Rewired;
 using MelonLoader;
 using System.Collections.Generic;
+using UnityStandardAssets.ImageEffects;
 
 namespace Photos_Plus
 {
@@ -43,7 +44,7 @@ namespace Photos_Plus
         // What Should Get Rendered
         // 0 - Render Everything
         // 1 - Render Anything Tagged "Player"
-        // 2 - Render Only The Player Character
+        // 2 - Render Only The Player Character - To Be Removed
         private int renderIsolated = 0;
 
         // Displays Controls On Screen
@@ -134,13 +135,32 @@ namespace Photos_Plus
                 cRot.x = transform.rotation.eulerAngles.x;
                 cRot.y = transform.rotation.eulerAngles.y;
 
+                // Disable The Camera's Animator
+                // Needed To Make Sure Cutscenes Don't Break Controls
+                if (transform.Find("PlayerCamera").GetComponent<Animator>())
+                {
+                    transform.Find("PlayerCamera").GetComponent<Animator>().enabled = false;
+                }
+
+                // Reset The Camera's Position And Rotation
+                // Needed To Make Sure Cutscenes Don't Break Controls
+                transform.Find("PlayerCamera").localPosition = Vector3.zero;
+                transform.Find("PlayerCamera").localEulerAngles = Vector3.zero;
+
                 // Get The Current Player Character
                 playerChar = GameObject.FindObjectOfType<PlayerBase>();
+
+                // Clear The Object List And Add The Player Character
                 myTransforms.Clear();
                 myTransforms.Add(playerChar.transform);
+
+                // Set The Player Character As The Currently Selected Object
                 selectedObject = 0;
+
+                // Set The Game To Use Camera Controls And Not Object Controls
                 manipulateObject = false;
 
+                // Clear Effect Toggles And Add One Toggle For The Player Character
                 characterEffects.Clear();
                 superEffects.Clear();
                 terrainEffects.Clear();
@@ -180,6 +200,7 @@ namespace Photos_Plus
                 // Hide The Game's UI
                 GameObject.FindObjectOfType<UI>().GetComponent<Canvas>().enabled = false;
 
+                // Show The Cursor
                 Cursor.visible = true;
 
                 // Freeze The Game
@@ -199,6 +220,13 @@ namespace Photos_Plus
                 // Enable The Camera Controller
                 GameObject.FindObjectOfType<PlayerBase>().enabled = true;
 
+                // Enable The Camera Animator
+                // Needed For Cutscenes
+                if (transform.Find("PlayerCamera").GetComponent<Animator>())
+                {
+                    transform.Find("PlayerCamera").GetComponent<Animator>().enabled = true;
+                }
+
                 // Unpause The Game
                 // Should Reset timeScale
                 Singleton<GameManager>.Instance.GameState = GameManager.State.Playing;
@@ -212,10 +240,14 @@ namespace Photos_Plus
                     Destroy(character.gameObject);
                 }
 
+                // Hide The Cursor
                 Cursor.visible = false;
 
+                // Remove All Items From spawnedChars
+                // Most Items Shouldn't Exist Anymore
                 spawnedChars.Clear();
 
+                // Make Sure The Original Player Character Is Playable
                 ReSetCharacter();
             }
 
@@ -328,13 +360,13 @@ namespace Photos_Plus
                 {
                     renderIsolated++;
 
-                    if (renderIsolated > 2)
+                    if (renderIsolated > 1)
                         renderIsolated = 0;
 
                     if (renderIsolated == 1)
                         gui.text = gui.text.Replace("Entire Screen", "Character Only");
                     else if (renderIsolated == 2)
-                        gui.text = gui.text.Replace("Character Only", "Character Only - No Terrain Effects");
+                        gui.text = gui.text.Replace("Character Only", "Entire Screen");
                     else
                         gui.text = gui.text.Replace("Character Only - No Terrain Effects", "Entire Screen");
 
@@ -388,6 +420,7 @@ namespace Photos_Plus
             }
             else if (dpadDown) dpadDown = false;
 
+            // Cycle Through Spawned Objects Using The Bumpers
             if (p.GetButtonDown("Right Bumper"))
             {
                 selectedObject++;
@@ -485,9 +518,23 @@ namespace Photos_Plus
         // Renders Only The Player Layer
         private Texture2D RenderPlayerOnly()
         {
+            // Turn Each Character's Effects On/Off
             ToggleCharacterEffects();
             ToggleCharacterSuperEffects();
             ToggleCharacterTerrainEffects();
+
+            // Disable Bloom - Prevents A Shadow Around Characters
+            transform.Find("PlayerCamera").GetComponent<LegacyBloom>().enabled = false;
+
+            // Render Shadow's Inhibiter Rings
+            if (GameObject.Find("shadow_L_limiter.xno"))
+            {
+                GameObject.Find("shadow_L_limiter.xno").layer = 8;
+                GameObject.Find("shadow_R_limiter.xno").layer = 8;
+            }
+
+            // Show Custom Characters
+            ShowCustomModelIsolated();
 
             // Create A Texture2D To Apply The Render To
             Texture2D mainShot = new Texture2D(Mathf.RoundToInt(float.Parse(resWidth.ToString()) * multiplier), Mathf.RoundToInt(float.Parse(resHeight.ToString()) * multiplier), TextureFormat.RGBA32, false);
@@ -532,7 +579,18 @@ namespace Photos_Plus
             camera.farClipPlane = 4500f;
             camera.cullingMask = mask;
 
+            // Reset Each Character's Effects To The State They Were Before
             ResetAllPlayerLayers();
+
+            // Enable Bloom
+            transform.Find("PlayerCamera").GetComponent<LegacyBloom>().enabled = true;
+
+            // Reset Shadow's Inhibiter Rings To Their Default State
+            if (GameObject.Find("shadow_L_limiter.xno"))
+            {
+                GameObject.Find("shadow_L_limiter.xno").layer = 13;
+                GameObject.Find("shadow_R_limiter.xno").layer = 13;
+            }
 
             // Return The Render
             return mainShot;
@@ -693,16 +751,19 @@ namespace Photos_Plus
             }
         }
 
+        // Spawns The Selected Character
         private PlayerBase CreateCharacter(string character)
         {
             return (Instantiate(Resources.Load("DefaultPrefabs/Player/" + character), transform.position + (transform.forward * 2), Quaternion.identity) as GameObject).GetComponent<PlayerBase>();
         }
 
+        // Returns The Original Character To A Playable State When Exiting Free Cam
         private void ReSetCharacter()
         {
             playerChar.enabled = true;
         }
 
+        // Disable Each Character's Effects If The Player Turned Them Off For That Character
         private void ToggleCharacterEffects()
         {
             for (int i = 0; i < myTransforms.Count; i++)
@@ -719,6 +780,7 @@ namespace Photos_Plus
             }
         }
 
+        // Disable Each Character's Terrain Effects If The Player Turned Them Off For That Character
         private void ToggleCharacterTerrainEffects()
         {
             for (int i = 0; i < myTransforms.Count; i++)
@@ -730,6 +792,7 @@ namespace Photos_Plus
             }
         }
 
+        // Disable Each Character's Super Form Effects If The Player Turned Them Off For That Character
         private void ToggleCharacterSuperEffects()
         {
             for (int i = 0; i < myTransforms.Count; i++)
@@ -741,20 +804,36 @@ namespace Photos_Plus
             }
         }
 
+        // Enable Each Character's Effects
         private void ResetAllPlayerLayers()
         {
             for (int i = 0; i < myTransforms.Count; i++)
             {
-                ChangeLayersRecursively(myTransforms[i], 8);
+                ChangeLayersRecursively(myTransforms[i].Find("PlayerEffects"), 8);
+                if (myTransforms[i].Find("PlayerEffects/SuperFX"))
+                {
+                    ChangeLayersRecursively(myTransforms[i].Find("PlayerEffects/SuperFX"), 8);
+                }
+                ChangeLayersRecursively(myTransforms[i].Find("CharacterTerrain(Clone)"), 8);
             }
         }
 
+        // Set The Layer Of An Object, And All Children, Grandchildren, etc.
         private void ChangeLayersRecursively(Transform trans, int layer)
         {
             trans.gameObject.layer = layer;
 
             foreach (Transform child in trans)
                 ChangeLayersRecursively(child, layer);
+        }
+
+        // Show Custom Characters In Isolated Renders
+        private void ShowCustomModelIsolated()
+        {
+            if (GameObject.Find("MeshCustom"))
+            {
+                ChangeLayersRecursively(GameObject.Find("MeshCustom").transform, 8);
+            }
         }
     }
 }
