@@ -1,4 +1,5 @@
 ﻿using MelonLoader;
+using System.IO;
 using UnityEngine;
 
 namespace Photos_Plus
@@ -7,6 +8,9 @@ namespace Photos_Plus
     {
         private Screenshot sc;
         public bool freezeGame;
+
+        internal AssetBundle bundle;
+        internal GameObject menu;
 
         // Add The Screenshot Component To The Camera
         // Needs Rewrite
@@ -22,6 +26,22 @@ namespace Photos_Plus
                 sc = GameObject.FindObjectOfType<PlayerCamera>().gameObject.AddComponent<Screenshot>();
             } else
                 sc = null;
+
+            if (menu == null)
+            {
+                bundle = AssetBundle.LoadFromFile(Path.Combine(MelonHandler.ModsDirectory, "P06ML", "Mods", "Plugins", "Photos Plus", "Menu"));
+
+                menu = bundle.LoadAsset("PhotosPlusUI") as GameObject;
+            }
+        }
+
+        public override void OnInitializeMelon()
+        {
+            base.OnInitializeMelon();
+
+            bundle = AssetBundle.LoadFromFile(Path.Combine(MelonHandler.ModsDirectory, "P06ML", "Mods", "Plugins", "Photos Plus", "Menu"));
+
+            menu = bundle.LoadAsset("PhotosPlusUI") as GameObject;
         }
     }
 }

@@ -4,6 +4,8 @@ using Rewired;
 using MelonLoader;
 using System.Collections.Generic;
 using UnityStandardAssets.ImageEffects;
+using Photos_Plus.Menu;
+using TMPro;
 
 namespace Photos_Plus
 {
@@ -89,11 +91,56 @@ namespace Photos_Plus
         private List<bool> superEffects = new List<bool>();
         private List<bool> terrainEffects = new List<bool>();
 
+        private MenuController menuController;
+        private ObjectControl oc;
+
+        private GameObject targetParticle;
+
+        private int playerOrigState;
+        private float playerOrigStateTime;
+
+        private int currentAnimation;
+
+        private string[] animNames = new string[3]
+        {
+            "Idle",
+            "Victory",
+            "Run"
+        };
+
+        public MenuController GetMenuController()
+        {
+            return menuController;
+        }
+
         private void Start()
         {
+            oc = gameObject.AddComponent<ObjectControl>();
+
             // Get The Input Controller
 
             p = ReInput.players.GetPlayer(0);
+
+            menuController = GameObject.Instantiate(Melon<Plugin>.Instance.menu).GetComponent<MenuController>();
+
+            menuController.tabs[0].transform.Find("Content/TakeScreenshot").GetComponent<MenuButton>().onClickEvent = new MenuButton.clickEvent(DoScreenshot);
+            menuController.tabs[0].transform.Find("Content/TakeScreenshotChar").GetComponent<MenuButton>().onClickEvent = new MenuButton.clickEvent(DoScreenshotIso);
+
+            menuController.tabs[1].transform.Find("Content/SpawnCharacterButton").GetComponent<MenuButton>().onClickEvent = new MenuButton.clickEvent(oc.SpawnCharacter);
+            menuController.tabs[1].transform.Find("Content/SpawnEnemyButton").GetComponent<MenuButton>().onClickEvent = new MenuButton.clickEvent(oc.SpawnEnemy);
+            menuController.tabs[2].transform.Find("Content/DeleteButton").GetComponent<MenuButton>().onClickEvent = new MenuButton.clickEvent(RemoveChar);
+            menuController.tabs[2].transform.Find("Content/NextFrameButton").GetComponent<MenuButton>().onClickEvent = new MenuButton.clickEvent(UpdateFrame);
+
+            menuController.tabs[0].transform.Find("Content/MoveSpeed/Slider/Handle").GetComponent<MenuSlider>().value = moveSpeed * 10;
+            menuController.tabs[0].transform.Find("Content/MoveMulti/Slider/Handle").GetComponent<MenuSlider>().value = 50;
+            menuController.tabs[0].transform.Find("Content/RotSpeed/Slider/Handle").GetComponent<MenuSlider>().value = rotateSpeed;
+            menuController.tabs[0].transform.Find("Content/Tilt/Slider/Handle").GetComponent<MenuSlider>().value = 50;
+
+            targetParticle = menuController.transform.Find("PhotoTarget").gameObject;
+
+            oc.AddEnemyList();
+
+            menuController.gameObject.SetActive(false);
         }
 
         // Get New Filename
@@ -205,6 +252,21 @@ namespace Photos_Plus
 
                 // Freeze The Game
                 Time.timeScale = 0;
+
+                AnimatorStateInfo asi = playerChar.transform.GetComponentInChildren<Animator>().GetCurrentAnimatorStateInfo(0);
+                playerOrigState = asi.shortNameHash;
+                playerOrigStateTime = asi.normalizedTime;
+
+                menuController.tabs[0].transform.Find("Content/Tilt/Slider/Handle").GetComponent<MenuSlider>().value = 50;
+                menuController.gameObject.SetActive(true);
+                menuController.tabs[2].transform.Find("Content/Object").GetComponent<MenuSelection>().value = 0;
+                menuController.tabs[2].transform.Find("Content/Object").GetComponent<MenuSelection>().labels = new List<string>
+                {
+                    "< Player >"
+                };
+
+                if (oc.animations.Count == 0)
+                    oc.animations.Add(0);
             } 
             // Return To Normal Gameplay When The Player Presses "Back"
             // While Freecam And Photo Mode Are Activated
@@ -249,6 +311,14 @@ namespace Photos_Plus
 
                 // Make Sure The Original Player Character Is Playable
                 ReSetCharacter();
+
+                oc.ToggleAnimation(playerChar, "Idle");
+
+                playerChar.transform.GetComponentInChildren<Animator>().Play(playerOrigState, 0, playerOrigStateTime);
+
+                oc.animations.Clear();
+
+                menuController.gameObject.SetActive(false);
             }
 
             // Use Freecam Controls When Freecam Is Activated
@@ -260,14 +330,31 @@ namespace Photos_Plus
 
         private void DoMove()
         {
+            selectedObject = menuController.tabs[2].transform.Find("Content/Object").GetComponent<MenuSelection>().value;
+            currentAnimation = oc.animations[selectedObject];
+
+            menuController.tabs[2].transform.Find("Content/Animation").GetComponent<MenuSelection>().value = currentAnimation;
+            menuController.tabs[2].transform.Find("Content/Animation").GetComponent<MenuSelection>().UpdateLabel();
+
+            menuController.tabs[2].transform.Find("Content/CharEffects").GetComponent<MenuSelection>().value = characterEffects[selectedObject] ? 1 : 0;
+            menuController.tabs[2].transform.Find("Content/SuperEffects").GetComponent<MenuSelection>().value = superEffects[selectedObject] ? 1 : 0;
+            menuController.tabs[2].transform.Find("Content/TerrainEffects").GetComponent<MenuSelection>().value = terrainEffects[selectedObject] ? 1 : 0;
+
+            menuController.tabs[2].transform.Find("Content/CharEffects").GetComponent<MenuSelection>().UpdateLabel();
+            menuController.tabs[2].transform.Find("Content/SuperEffects").GetComponent<MenuSelection>().UpdateLabel();
+            menuController.tabs[2].transform.Find("Content/TerrainEffects").GetComponent<MenuSelection>().UpdateLabel();
+
             // Vector That Stores How Much The Camera Should Move This Frame
             Vector3 moveVector = new Vector3();
 
             // deltaTime Replacement
             float frameTime = Time.realtimeSinceStartup - lastFrameTime;
 
+            moveSpeed = menuController.tabs[0].transform.Find("Content/MoveSpeed/Slider/Handle").GetComponent<MenuSlider>().value / 10;
+            rotateSpeed = menuController.tabs[0].transform.Find("Content/RotSpeed/Slider/Handle").GetComponent<MenuSlider>().value;
+
             // Change The Camera Movement Multiplier Using Analogue Controls
-            moveMultiplier = p.GetAxis("Left Trigger") * 8 + 1;
+            moveMultiplier = p.GetAxis("Left Trigger") * (menuController.tabs[0].transform.Find("Content/MoveMulti/Slider/Handle").GetComponent<MenuSlider>().value / 5) + 1;
 
             // Use Left Stick Analogue Y Axis To Set The Forward Movement Of The Camera
             if (p.GetAxis("Left Stick Y") != 0)
@@ -282,19 +369,29 @@ namespace Photos_Plus
             }
 
             // Use The A And B Buttons To Set The Upwards Movement Of The Camera
-            if (p.GetButton("Button A"))
+            if (p.GetButton("Button Y"))
             {
                 moveVector += transform.up * moveSpeed * frameTime;
-            } else if (p.GetButton("Button B"))
+            } else if (p.GetButton("Button X"))
             {
                 moveVector -= transform.up * moveSpeed * frameTime;
             }
 
             // Move The Camera
             if (manipulateObject)
+            {
                 myTransforms[selectedObject].position += moveVector;
+                targetParticle.SetActive(true);
+                targetParticle.transform.position = myTransforms[selectedObject].position;
+
+                // targetParticle.GetComponent<ParticleSystem>().Simulate(targetParticle.GetComponent<ParticleSystem>().time + frameTime);
+                // targetParticle.transform.Find("Particle System").GetComponent<ParticleSystem>().Simulate(targetParticle.transform.Find("Particle System").GetComponent<ParticleSystem>().time + frameTime);
+            }
             else
+            {
                 transform.position += moveVector;
+                targetParticle.SetActive(false);
+            }
 
             // Change moveVector To The Camera's Rotation
             if (manipulateObject)
@@ -312,6 +409,8 @@ namespace Photos_Plus
             {
                 moveVector.y += rotateSpeed * p.GetAxis("Right Stick X") * frameTime;
             }
+
+            if (!manipulateObject) moveVector.z = (menuController.tabs[0].transform.Find("Content/Tilt/Slider/Handle").GetComponent<MenuSlider>().value - 50) * 3;
 
             // Prevent The Camera From Rotating Upside Down
             if (moveVector.x >= 89 && moveVector.x < 100)
@@ -337,106 +436,205 @@ namespace Photos_Plus
             // Position 2 Units In Front Of The Current View For Objects To Teleport To
             Vector3 tpPos = transform.position + (transform.forward * 2);
 
-            // Teleport The Player Character To tpPos When The Player Presses "Y"
-            if (p.GetButtonDown("Button Y"))
+            if (p.GetButtonDown("Button A"))
             {
-                myTransforms[selectedObject].position = tpPos;
+                menuController.inputs[4] = 1;
+            } else
+            {
+                menuController.inputs[4] = 0;
             }
 
-            // Take A Screenshot When The Player Presses "X"
-            if (p.GetButtonDown("Button X"))
+            if (p.GetButtonDown("Button B"))
             {
-                Melon<Plugin>.Logger.Msg("Taking Screenshot");
-                DoScreenshot();
-                Melon<Plugin>.Logger.Msg("Took Screenshot");
-                Melon<Plugin>.Logger.Msg(string.Format("Screenshot saved to: {0}", filename));
+                menuController.gameObject.SetActive(!menuController.gameObject.activeSelf);
             }
+
+            // Teleport The Player Character To tpPos When The Player Presses "Y"
+            //if (p.GetButtonDown("Button Y"))
+            //{
+            //    myTransforms[selectedObject].position = tpPos;
+            //}
+
+            //// Take A Screenshot When The Player Presses "X"
+            //if (p.GetButtonDown("Button X"))
+            //{
+            //    Melon<Plugin>.Logger.Msg("Taking Screenshot");
+            //    DoScreenshot();
+            //    Melon<Plugin>.Logger.Msg("Took Screenshot");
+            //    Melon<Plugin>.Logger.Msg(string.Format("Screenshot saved to: {0}", filename));
+            //}
 
             // Change The Render Isolation Mode And UI Text When The Player Presses Left On The D-Pad
             if (p.GetAxis("D-Pad X") < 0)
             {
-                // Make Sure The Input Only Fires Once Per Button Press
-                if (!dpadLeft)
+                menuController.inputs[2] = 1;
+
+                if (menuController.tabs[2].currentEvent.name == "Animation" && menuController.tabs[2].currentEvent.GetComponent<MenuSelection>().leftPressed == false)
                 {
-                    renderIsolated++;
+                    currentAnimation = menuController.tabs[2].currentEvent.GetComponent<MenuSelection>().value - 1;
 
-                    if (renderIsolated > 1)
-                        renderIsolated = 0;
-
-                    if (renderIsolated == 1)
-                        gui.text = gui.text.Replace("Entire Screen", "Character Only");
-                    else if (renderIsolated == 2)
-                        gui.text = gui.text.Replace("Character Only", "Entire Screen");
-                    else
-                        gui.text = gui.text.Replace("Character Only - No Terrain Effects", "Entire Screen");
-
-                    dpadLeft = true;
+                    if (currentAnimation < 0)
+                        currentAnimation = 1;
                 }
+
+                if (menuController.tabs[2].currentEvent.name == "CharEffects" && menuController.tabs[2].currentEvent.GetComponent<MenuSelection>().leftPressed == false)
+                {
+                    characterEffects[selectedObject] = !characterEffects[selectedObject];
+                }
+                if (menuController.tabs[2].currentEvent.name == "SuperEffects" && menuController.tabs[2].currentEvent.GetComponent<MenuSelection>().leftPressed == false)
+                {
+                    superEffects[selectedObject] = !superEffects[selectedObject];
+                }
+                if (menuController.tabs[2].currentEvent.name == "TerrainEffects" && menuController.tabs[2].currentEvent.GetComponent<MenuSelection>().leftPressed == false)
+                {
+                    terrainEffects[selectedObject] = !terrainEffects[selectedObject];
+                }
+
+                // Make Sure The Input Only Fires Once Per Button Press
+                //if (!dpadLeft)
+                //{
+                //    renderIsolated++;
+
+                //    if (renderIsolated > 1)
+                //        renderIsolated = 0;
+
+                //    if (renderIsolated == 1)
+                //        gui.text = gui.text.Replace("Entire Screen", "Character Only");
+                //    else if (renderIsolated == 2)
+                //        gui.text = gui.text.Replace("Character Only", "Entire Screen");
+                //    else
+                //        gui.text = gui.text.Replace("Character Only - No Terrain Effects", "Entire Screen");
+
+                //    dpadLeft = true;
+                //}
             }
-            else if (dpadLeft)
-                dpadLeft = false;
+            else
+                menuController.inputs[2] = 0;
+            //else if (dpadLeft)
+            //    dpadLeft = false;
 
             // Toggle Between Moving The Camera And The Currently Selected Object When The Player
             // Presses Right On The D-Pad
             if (p.GetAxis("D-Pad X") > 0)
             {
-                if (!dpadRight)
-                {
-                    dpadRight = true;
+                menuController.inputs[3] = 1;
 
-                    manipulateObject = !manipulateObject;
+                if (menuController.tabs[2].currentEvent.name == "Animation" && menuController.tabs[2].currentEvent.GetComponent<MenuSelection>().rightPressed == false)
+                {
+                    currentAnimation = menuController.tabs[2].currentEvent.GetComponent<MenuSelection>().value + 1;
+
+                    if (currentAnimation >= 2)
+                        currentAnimation = 0;
                 }
-            } else if (dpadRight) dpadRight = false;
+
+                if (menuController.tabs[2].currentEvent.name == "CharEffects" && menuController.tabs[2].currentEvent.GetComponent<MenuSelection>().rightPressed == false)
+                {
+                    characterEffects[selectedObject] = !characterEffects[selectedObject];
+                }
+                if (menuController.tabs[2].currentEvent.name == "SuperEffects" && menuController.tabs[2].currentEvent.GetComponent<MenuSelection>().rightPressed == false)
+                {
+                    superEffects[selectedObject] = !superEffects[selectedObject];
+                }
+                if (menuController.tabs[2].currentEvent.name == "TerrainEffects" && menuController.tabs[2].currentEvent.GetComponent<MenuSelection>().rightPressed == false)
+                {
+                    terrainEffects[selectedObject] = !terrainEffects[selectedObject];
+                }
+                //if (!dpadRight)
+                //{
+                //    dpadRight = true;
+
+                //    manipulateObject = !manipulateObject;
+                //}
+            }
+            else
+                menuController.inputs[3] = 0;
+            //else if (dpadRight) dpadRight = false;
 
             // Increase The Render Resolution Multiplier When The Player Presses Up On The D-Pad
             if (p.GetAxis("D-Pad Y") > 0)
             {
-                if (!dpadUp)
-                {
-                    dpadUp = true;
+                menuController.inputs[0] = 1;
 
-                    multiplier += 0.5f;
+                //if (!dpadUp)
+                //{
+                //    dpadUp = true;
 
-                    // Update The UI Text With The New Resolution
-                    UpdateResolutionGUI();
-                }
+                //    multiplier += 0.5f;
+
+                //    // Update The UI Text With The New Resolution
+                //    UpdateResolutionGUI();
+                //}
             }
-            else if (dpadUp) dpadUp = false;
+            else
+                menuController.inputs[0] = 0;
+            //else if (dpadUp) dpadUp = false;
 
             // Decrease The Render Resolution Multiplier When The Player Presses Down On The D-Pad
             if (p.GetAxis("D-Pad Y") < 0)
             {
-                if (!dpadDown)
-                {
-                    dpadDown = true;
+                menuController.inputs[1] = 1;
 
-                    // Don't Lower The Resolution Below Half
-                    if (multiplier > 0.6f)
-                        multiplier -= 0.5f;
+                //if (!dpadDown)
+                //{
+                //    dpadDown = true;
 
-                    // Update The UI Text With The New Resolution
-                    UpdateResolutionGUI();
-                }
+                //    // Don't Lower The Resolution Below Half
+                //    if (multiplier > 0.6f)
+                //        multiplier -= 0.5f;
+
+                //    // Update The UI Text With The New Resolution
+                //    UpdateResolutionGUI();
+                //}
             }
-            else if (dpadDown) dpadDown = false;
+            else
+                menuController.inputs[1] = 0;
+            //else if (dpadDown) dpadDown = false;
 
             // Cycle Through Spawned Objects Using The Bumpers
             if (p.GetButtonDown("Right Bumper"))
             {
-                selectedObject++;
-                if (selectedObject >= myTransforms.Count)
-                    selectedObject = 0;
+                menuController.NextTab();
+
+                if (menuController.currentTab == 2)
+                    manipulateObject = true;
+                else
+                    manipulateObject = false;
+
+                //selectedObject++;
+                //if (selectedObject >= myTransforms.Count)
+                //    selectedObject = 0;
             }
 
             if (p.GetButtonDown("Left Bumper"))
             {
-                selectedObject--;
-                if (selectedObject < 0)
-                    selectedObject = myTransforms.Count - 1;
+                menuController.PreviousTab();
+
+                if (menuController.currentTab == 2)
+                    manipulateObject = true;
+                else
+                    manipulateObject = false;
+
+                //selectedObject--;
+                //if (selectedObject < 0)
+                //    selectedObject = myTransforms.Count - 1;
+            }
+
+            if (currentAnimation != oc.animations[selectedObject])
+            {
+                oc.animations[selectedObject] = currentAnimation;
+
+                oc.ToggleAnimation(myTransforms[selectedObject].GetComponent<PlayerBase>(), animNames[currentAnimation]);
             }
 
             // Update lastFrameTime
             lastFrameTime = Time.realtimeSinceStartup;
+        }
+
+        public void DoScreenshotIso()
+        {
+            renderIsolated = 1;
+            DoScreenshot();
+            renderIsolated = 0;
         }
 
         // Exports A Screenshot
@@ -616,9 +814,11 @@ namespace Photos_Plus
             }
         }
 
-        // Render The UI
+        // Render The UI - Old
         void OnGUI()
         {
+            return;
+
             if (freecam)
             {
                 GUILayout.Box(gui);
@@ -748,6 +948,59 @@ namespace Photos_Plus
                 else
                     GUILayout.Label("Moving Camera");
                 GUILayout.EndVertical();
+            }
+        }
+
+        public void AddChar(string character)
+        {
+            PlayerBase pbase = CreateCharacter(character);
+            spawnedChars.Add(pbase);
+            myTransforms.Add(pbase.transform);
+
+            characterEffects.Add(false);
+            superEffects.Add(false);
+            terrainEffects.Add(false);
+        }
+
+        public void RemoveChar()
+        {
+            if (menuController.tabs[2].transform.Find("Content/Object").GetComponent<MenuSelection>().value == 0) return;
+
+            characterEffects.RemoveAt(selectedObject);
+            superEffects.RemoveAt(selectedObject);
+            terrainEffects.RemoveAt(selectedObject);
+
+            if (myTransforms[selectedObject].GetComponent<PlayerBase>())
+            {
+                PlayerBase pbase = myTransforms[selectedObject].GetComponent<PlayerBase>();
+                spawnedChars.Remove(pbase);
+                Destroy(pbase.gameObject);
+            } else
+            {
+                Destroy(myTransforms[selectedObject].gameObject);
+            }
+            myTransforms.RemoveAt(selectedObject);
+
+            menuController.tabs[2].transform.Find("Content/Object").GetComponent<MenuSelection>().value = 0;
+            menuController.tabs[2].transform.Find("Content/Object").GetComponent<MenuSelection>().labels.RemoveAt(selectedObject);
+            menuController.tabs[2].transform.Find("Content/Object").GetComponent<MenuSelection>().UpdateLabel();
+        }
+
+        public void AddEnemy(Transform en)
+        {
+            myTransforms.Add(en);
+
+            characterEffects.Add(false);
+            superEffects.Add(false);
+            terrainEffects.Add(false);
+        }
+
+        public void UpdateFrame()
+        {
+            myTransforms[selectedObject].gameObject.GetComponentInChildren<Animator>().Update(0.01f);
+            if (myTransforms[selectedObject].name.Contains("Princess"))
+            {
+                myTransforms[selectedObject].Find("Mesh/sonic_Root/ch_princess01").GetComponent<Animator>().Update(0.01f);
             }
         }
 

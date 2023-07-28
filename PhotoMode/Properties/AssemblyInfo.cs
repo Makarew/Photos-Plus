@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 using MelonLoader;
 using Photos_Plus;
 
-[assembly: MelonInfo(typeof(Plugin), "Photos Plus", "0.7.0", "Makarew")]
+[assembly: MelonInfo(typeof(Plugin), "Photos Plus", "0.9.0", "Makarew")]
 
 // General Information about an assembly is controlled through the following
 // set of attributes. Change these attribute values to modify the information
